@@ -2,6 +2,8 @@
 __pycache__/
 classify_image_graph_def.pb
 log
+train_log
+sample_log
 models
 output
 data

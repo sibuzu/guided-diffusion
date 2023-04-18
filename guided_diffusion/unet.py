@@ -631,7 +631,7 @@ class UNetModel(nn.Module):
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
-    def forward(self, x, timesteps, y=None):
+    def forward(self, x, timesteps = None, y=None):
         """
         Apply the model to an input batch.
 
@@ -643,6 +643,12 @@ class UNetModel(nn.Module):
         assert (y is not None) == (
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
+
+        # if timesteps is None:
+        print(f"0: x.shape={x.shape}, timesteps={timesteps}")
+        if timesteps is None:
+            timesteps = th.Tensor([36, 87]).cuda()
+        print(f"1: x.shape={x.shape}, timesteps={timesteps}")
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))

@@ -135,7 +135,7 @@ def create_argparser():
         batch_size=8,
         use_ddim=False,
         model_path="",
-        log_dir="./log",
+        log_dir="./sample_log",
         output_dir="./output",
     )
     defaults.update(model_and_diffusion_defaults())
