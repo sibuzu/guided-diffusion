@@ -1,11 +1,11 @@
 import math
 import random
 
-# from PIL import Image
 import os
+import csv
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
-
+import pandas as pd
 
 def load_data(
     *,
@@ -34,18 +34,12 @@ def load_data(
     if not data_dir:
         raise ValueError("unspecified data directory")
     all_files, all_length = _list_image_files_recursively(data_dir)
-    print(all_files)
-    print(all_length)
-    print(f"total = {sum(all_length)}")
-    exit(0)
     dataset = StockDataset(
-        image_size,
+        stock_size,
         all_files,
         all_length,
-        days = stock_size,
-        random_crop=random_crop,
-        random_flip=random_flip,
     )
+    print(f"dataset={len(dataset)}")
     if deterministic:
         loader = DataLoader(
             dataset, batch_size=batch_size, shuffle=False, num_workers=1, drop_last=True
@@ -57,106 +51,89 @@ def load_data(
     while True:
         yield from loader
 
+def _save_cache(fname, files, lens):
+    merged_list = list(zip(files, lens))
+
+    # Save the merged list to a CSV file
+    with open(fname, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        for row in merged_list:
+            writer.writerow(row)
+
+def _load_cache(fname):
+    files = []
+    lens = []
+    with open(fname, 'r', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            files.append(row[0])
+            lens.append(int(row[1]))
+    return files, lens
 
 def _list_image_files_recursively(data_dir):
     results = []
-    for entry in sorted(os.listdir(data_dir)):
-        full_path = os.path.join(data_dir, entry)
-        ext = entry.split(".")[-1]
-        if "." in entry and ext.lower() in ["feather"]:
-            results.append(full_path)
-
-        elif os.path.isdir(full_path):
-            results.extend(_list_image_files_recursively(full_path))
-            
     length = []
+    cachefile = os.path.join(data_dir, "_cache_.csv")
+    if os.path.isfile(cachefile):
+        results, length = _load_cache(cachefile)
+    else:
+        for entry in sorted(os.listdir(data_dir)):
+            full_path = os.path.join(data_dir, entry)
+            ext = entry.split(".")[-1]
+            if "." in entry and ext.lower() in ["feather"]:
+                results.append(full_path)
+                df = pd.read_feather(full_path)
+                length.append(len(df))
+            elif os.path.isdir(full_path):
+                res, lens = _list_image_files_recursively(full_path)
+                results.extend(res)
+                results.extend(lens)
+        if len(results) > 0:
+            _save_cache(cachefile, results, length)
+
     return results, length
 
 
 class StockDataset(Dataset):
     def __init__(
         self,
-        resolution,
+        stocks_size,
         stocks_paths,
         stocks_length,
-        days=64,
-        random_crop=False,
-        random_flip=True,
     ):
         super().__init__()
-        self.resolution = resolution
+        self.stocks_size = stocks_size
         self.local_stocks = stocks_paths
         self.local_length = stocks_length
-        self.days = days
-        self.local_classes = None
-        self.random_crop = random_crop
-        self.random_flip = random_flip
 
     def __len__(self):
-        return len(self.local_images)
+        lens = sum(self.local_length) - len(self.local_length) * self.stocks_size
+        return lens
 
     def __getitem__(self, idx):
-        path = self.local_images[idx]
-        with bf.BlobFile(path, "rb") as f:
-            pil_image = Image.open(f)
-            pil_image.load()
-        pil_image = pil_image.convert("RGB")
+        for n, fname in zip(self.local_length, self.local_stocks):
+            n = max(0, n - self.stocks_size)
+            if idx >= n:
+                idx -= n
+                continue
 
-        if self.random_crop:
-            arr = random_crop_arr(pil_image, self.resolution)
-        else:
-            arr = center_crop_arr(pil_image, self.resolution)
+            df = pd.read_feather(fname)
+            sample = df.iloc[idx:idx+self.stocks_size, 1:6].values.astype(np.float32)
+            # print(f"dtyep={sample.dtype}")
+            
+            hx, lx = 0.9, -0.9
+            hv, lv = 0.8, -1
+            high = sample[:, 1].max()
+            low = sample[:, 2].min()
+            vmax = sample[:, 4].max()
+            vmin = 0
 
-        if self.random_flip and random.random() < 0.5:
-            arr = arr[:, ::-1]
-
-        arr = arr.astype(np.float32) / 127.5 - 1
-
-        out_dict = {}
-        if self.local_classes is not None:
-            out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
-        return np.transpose(arr, [2, 0, 1]), out_dict
-
-
-def center_crop_arr(pil_image, image_size):
-    # We are not on a new enough PIL to support the `reducing_gap`
-    # argument, which uses BOX downsampling at powers of two first.
-    # Thus, we do it by hand to improve downsample quality.
-    while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
-
-    scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
-
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return arr[crop_y : crop_y + image_size, crop_x : crop_x + image_size]
-
-
-def random_crop_arr(pil_image, image_size, min_crop_frac=0.8, max_crop_frac=1.0):
-    min_smaller_dim_size = math.ceil(image_size / max_crop_frac)
-    max_smaller_dim_size = math.ceil(image_size / min_crop_frac)
-    smaller_dim_size = random.randrange(min_smaller_dim_size, max_smaller_dim_size + 1)
-
-    # We are not on a new enough PIL to support the `reducing_gap`
-    # argument, which uses BOX downsampling at powers of two first.
-    # Thus, we do it by hand to improve downsample quality.
-    while min(*pil_image.size) >= 2 * smaller_dim_size:
-        pil_image = pil_image.resize(
-            tuple(x // 2 for x in pil_image.size), resample=Image.BOX
-        )
-
-    scale = smaller_dim_size / min(*pil_image.size)
-    pil_image = pil_image.resize(
-        tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC
-    )
-
-    arr = np.array(pil_image)
-    crop_y = random.randrange(arr.shape[0] - image_size + 1)
-    crop_x = random.randrange(arr.shape[1] - image_size + 1)
-    return arr[crop_y : crop_y + image_size, crop_x : crop_x + image_size]
+            if high <= low or vmax <= 0:
+                # invalid row
+                samples = np.zeros_like(sample)
+            else:
+                sample[:,:4] = (sample[:,:4]-low) / (high-low) * (hx - lx) + lx
+                sample[:,4] = (sample[:,4]-vmin) / (vmax-vmin) * (hv - lv) + lv
+            
+            sample = np.transpose(sample, [1, 0])
+            return sample, {}    # class is null ({})

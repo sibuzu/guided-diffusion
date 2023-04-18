@@ -645,10 +645,10 @@ class UNetModel(nn.Module):
         ), "must specify y if and only if the model is class-conditional"
 
         # if timesteps is None:
-        print(f"0: x.shape={x.shape}, timesteps={timesteps}")
-        if timesteps is None:
+        # print(f"0: x.shape={x.shape}, timesteps={timesteps}")
+        if timesteps is None:   # this is for torch-summary
             timesteps = th.Tensor([36, 87]).cuda()
-        print(f"1: x.shape={x.shape}, timesteps={timesteps}")
+        # print(f"1: x.shape={x.shape}, timesteps={timesteps}")
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
