@@ -13,8 +13,6 @@ def load_data(
     batch_size,
     stock_size,
     deterministic=False,
-    random_crop=False,
-    random_flip=False,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -105,35 +103,45 @@ class StockDataset(Dataset):
         self.stocks_size = stocks_size
         self.local_stocks = stocks_paths
         self.local_length = stocks_length
+        self.fast_count = 0
+        self.df = None
 
     def __len__(self):
         lens = sum(self.local_length) - len(self.local_length) * self.stocks_size
         return lens
 
     def __getitem__(self, idx):
-        for n, fname in zip(self.local_length, self.local_stocks):
-            n = max(0, n - self.stocks_size)
-            if idx >= n:
-                idx -= n
-                continue
+        if self.fast_count > 0:
+            # This is dirty quick method, for the same df, we sample multiple times instead just once
+            self.fast_count = self.fast_count - 1
+            idx = random.randint(0, len(self.df) - self.stocks_size)
+        else:
+            for n, fname in zip(self.local_length, self.local_stocks):
+                n = max(0, n - self.stocks_size)
+                if idx >= n:
+                    idx -= n
+                    continue
 
-            df = pd.read_feather(fname)
-            sample = df.iloc[idx:idx+self.stocks_size, 1:6].values.astype(np.float32)
-            # print(f"dtyep={sample.dtype}")
-            
-            hx, lx = 0.9, -0.9
-            hv, lv = 0.8, -1
-            high = sample[:, 1].max()
-            low = sample[:, 2].min()
-            vmax = sample[:, 4].max()
-            vmin = 0
+                self.df = pd.read_feather(fname)
+                self.fast_count = n // (self.stocks_size * 4) - 1
+                break
 
-            if high <= low or vmax <= 0:
-                # invalid row
-                samples = np.zeros_like(sample)
-            else:
-                sample[:,:4] = (sample[:,:4]-low) / (high-low) * (hx - lx) + lx
-                sample[:,4] = (sample[:,4]-vmin) / (vmax-vmin) * (hv - lv) + lv
-            
-            sample = np.transpose(sample, [1, 0])
-            return sample, {}    # class is null ({})
+        sample = self.df.iloc[idx:idx+self.stocks_size, 1:6].values.astype(np.float32)
+        # print(f"dtyep={sample.dtype}")
+        
+        hx, lx = 0.9, -0.9
+        hv, lv = 0.8, -1
+        high = sample[:, 1].max()
+        low = sample[:, 2].min()
+        vmax = sample[:, 4].max()
+        vmin = 0
+
+        if high <= low or vmax <= 0:
+            # invalid row
+            samples = np.zeros_like(sample)
+        else:
+            sample[:,:4] = (sample[:,:4]-low) / (high-low) * (hx - lx) + lx
+            sample[:,4] = (sample[:,4]-vmin) / (vmax-vmin) * (hv - lv) + lv
+        
+        sample = np.transpose(sample, [1, 0])
+        return sample, {}    # class is null ({})

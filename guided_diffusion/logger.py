@@ -14,6 +14,7 @@ import tempfile
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager
+import datetime
 
 DEBUG = 10
 INFO = 20
@@ -237,6 +238,13 @@ def dumpkvs():
     """
     Write all of the diagnostics from the current iteration
     """
+    current_time = datetime.datetime.now()
+
+    # Format the current time as a string
+    formatted_time = current_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Print the formatted time
+    log(f"t: {formatted_time}")
     return get_current().dumpkvs()
 
 
