@@ -45,7 +45,7 @@ def model_and_diffusion_defaults():
     Defaults for image training.
     """
     res = dict(
-        image_size=64,
+        stock_size=64,
         num_channels=128,
         num_res_blocks=2,
         num_heads=4,
@@ -72,7 +72,7 @@ def classifier_and_diffusion_defaults():
 
 
 def create_model_and_diffusion(
-    image_size,
+    stock_size,
     class_cond,
     learn_sigma,
     num_channels,
@@ -97,7 +97,7 @@ def create_model_and_diffusion(
     use_new_attention_order,
 ):
     model = create_model(
-        image_size,
+        stock_size,
         num_channels,
         num_res_blocks,
         channel_mult=channel_mult,
@@ -128,7 +128,7 @@ def create_model_and_diffusion(
 
 
 def create_model(
-    image_size,
+    stock_size,
     num_channels,
     num_res_blocks,
     channel_mult="",
@@ -146,25 +146,25 @@ def create_model(
     use_new_attention_order=False,
 ):
     if channel_mult == "":
-        if image_size == 512:
+        if stock_size == 512:
             channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
-        elif image_size == 256:
+        elif stock_size == 256:
             channel_mult = (1, 1, 2, 2, 4, 4)
-        elif image_size == 128:
+        elif stock_size == 128:
             channel_mult = (1, 1, 2, 3, 4)
-        elif image_size == 64:
+        elif stock_size == 64:
             channel_mult = (1, 2, 3, 4)
         else:
-            raise ValueError(f"unsupported image size: {image_size}")
+            raise ValueError(f"unsupported image stock: {stock_size}")
     else:
         channel_mult = tuple(int(ch_mult) for ch_mult in channel_mult.split(","))
 
     attention_ds = []
     for res in attention_resolutions.split(","):
-        attention_ds.append(image_size // int(res))
+        attention_ds.append(stock_size // int(res))
 
     return UNetModel(
-        image_size=image_size,
+        image_size=stock_size,
         in_channels=5,
         model_channels=num_channels,
         out_channels=(5 if not learn_sigma else 6),

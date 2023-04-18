@@ -1,9 +1,8 @@
 import math
 import random
 
-from PIL import Image
-import blobfile as bf
-from mpi4py import MPI
+# from PIL import Image
+import os
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
 
@@ -12,11 +11,10 @@ def load_data(
     *,
     data_dir,
     batch_size,
-    image_size,
-    class_cond=False,
+    stock_size,
     deterministic=False,
     random_crop=False,
-    random_flip=True,
+    random_flip=False,
 ):
     """
     For a dataset, create a generator over (images, kwargs) pairs.
@@ -29,29 +27,22 @@ def load_data(
     :param data_dir: a dataset directory.
     :param batch_size: the batch size of each returned pair.
     :param image_size: the size to which images are resized.
-    :param class_cond: if True, include a "y" key in returned dicts for class
-                       label. If classes are not available and this is true, an
-                       exception will be raised.
     :param deterministic: if True, yield results in a deterministic order.
     :param random_crop: if True, randomly crop the images for augmentation.
     :param random_flip: if True, randomly flip the images for augmentation.
     """
     if not data_dir:
         raise ValueError("unspecified data directory")
-    all_files = _list_image_files_recursively(data_dir)
-    classes = None
-    if class_cond:
-        # Assume classes are the first part of the filename,
-        # before an underscore.
-        class_names = [bf.basename(path).split("_")[0] for path in all_files]
-        sorted_classes = {x: i for i, x in enumerate(sorted(set(class_names)))}
-        classes = [sorted_classes[x] for x in class_names]
-    dataset = ImageDataset(
+    all_files, all_length = _list_image_files_recursively(data_dir)
+    print(all_files)
+    print(all_length)
+    print(f"total = {sum(all_length)}")
+    exit(0)
+    dataset = StockDataset(
         image_size,
         all_files,
-        classes=classes,
-        shard=MPI.COMM_WORLD.Get_rank(),
-        num_shards=MPI.COMM_WORLD.Get_size(),
+        all_length,
+        days = stock_size,
         random_crop=random_crop,
         random_flip=random_flip,
     )
@@ -69,31 +60,35 @@ def load_data(
 
 def _list_image_files_recursively(data_dir):
     results = []
-    for entry in sorted(bf.listdir(data_dir)):
-        full_path = bf.join(data_dir, entry)
+    for entry in sorted(os.listdir(data_dir)):
+        full_path = os.path.join(data_dir, entry)
         ext = entry.split(".")[-1]
-        if "." in entry and ext.lower() in ["jpg", "jpeg", "png", "gif"]:
+        if "." in entry and ext.lower() in ["feather"]:
             results.append(full_path)
-        elif bf.isdir(full_path):
+
+        elif os.path.isdir(full_path):
             results.extend(_list_image_files_recursively(full_path))
-    return results
+            
+    length = []
+    return results, length
 
 
-class ImageDataset(Dataset):
+class StockDataset(Dataset):
     def __init__(
         self,
         resolution,
-        image_paths,
-        classes=None,
-        shard=0,
-        num_shards=1,
+        stocks_paths,
+        stocks_length,
+        days=64,
         random_crop=False,
         random_flip=True,
     ):
         super().__init__()
         self.resolution = resolution
-        self.local_images = image_paths[shard:][::num_shards]
-        self.local_classes = None if classes is None else classes[shard:][::num_shards]
+        self.local_stocks = stocks_paths
+        self.local_length = stocks_length
+        self.days = days
+        self.local_classes = None
         self.random_crop = random_crop
         self.random_flip = random_flip
 
