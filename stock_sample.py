@@ -52,11 +52,11 @@ def plot_chart(fname, ary, days, title):
     fig.savefig(fname)
     plt.close(fig)
 
-def save_charts(xpath, prefix, samples, xdays, flist, xbase):
+def save_charts(xpath, prefix, samples, xdays, flist, xbase, count):
     if not os.path.exists(xpath):
         os.makedirs(xpath, exist_ok=True)
 
-    for x in range(samples.shape[0]):
+    for x in range(count):
         fname = f"{xpath}/{prefix}_{xbase+x:06d}.png"
         ary = samples[x,:,:].cpu().numpy()
         ary = np.swapaxes(ary, 0, -1)
@@ -73,16 +73,23 @@ def main():
     # dist_util.setup_dist()
     logger.configure(args.log_dir)
 
-    logger.log("get data from original...")
-    data = load_data(
-        data_dir=args.data_dir,
-        batch_size=args.batch_size,
-        stock_size=args.stock_size,
-        quick_sampling=False,
-    )
-    for sample, xdays, flist in data:
-        save_charts(args.output_dir, "norm", sample, xdays, flist, 0)
-        break
+    if os.path.exists(args.data_dir):
+        logger.log("get data from original...")
+        data = load_data(
+            data_dir=args.data_dir,
+            batch_size=args.batch_size,
+            stock_size=args.stock_size,
+            quick_sampling=False,
+        )
+
+        charts = 0
+        while args.num_charts - charts > 0:
+            for sample, xdays, flist in data:
+                count = min(args.num_charts - charts, sample.shape[0])
+                save_charts(args.output_dir, "orig", sample, xdays, flist, charts, count)
+                charts += count
+                if args.num_charts - charts <= 0:
+                    break
 
     logger.log("creating model and diffusion...")
     model, diffusion = create_model_and_diffusion(
@@ -114,8 +121,10 @@ def main():
         )
 
         # save chart
-        save_charts(args.output_dir, "gene", sample, None, None, xbase)
-        xbase += sample.shape[0]
+        if xbase < args.num_charts:
+            xcount = min(args.num_charts - xbase, sample.shape[0])
+            save_charts(args.output_dir, "gene", sample, None, None, xbase, xcount)
+            xbase += xcount
 
         # concat all_images
         sample = sample.permute(0, 2, 1)
@@ -125,13 +134,19 @@ def main():
 
     arr = np.concatenate(all_images, axis=0)
     arr = arr[: args.num_samples]
-    if args.class_cond:
-        label_arr = np.concatenate(all_labels, axis=0)
-        label_arr = label_arr[: args.num_samples]
     shape_str = "x".join([str(x) for x in arr.shape])
-    out_path = os.path.join(args.output_dir, f"gene_{shape_str}.npz")
+
+    # convert arr to panda
+    arr = arr.reshape(arr.shape[0] * arr.shape[1], arr.shape[2])
+    df = pd.DataFrame(arr)
+    df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    df['Volume'] = df['Volume'] + 1
+    df['Date'] = pd.date_range(start='2001-01-01', periods=len(df))
+    df = df.set_index('Date', drop=True)
+
+    out_path = os.path.join(args.output_dir, f"gene_{shape_str}.csv")
     logger.log(f"saving to {out_path}")
-    np.savez(out_path, arr)
+    df.to_csv(out_path)
 
     # dist.barrier()
     logger.log("sampling complete")
@@ -140,13 +155,14 @@ def main():
 def create_argparser():
     defaults = dict(
         clip_denoised=True,
-        num_samples=10,
+        num_samples=20,
+        num_charts=12,
         batch_size=10,
         use_ddim=False,
-        model_path="./train_log/ema_0.9999_020000.pt",
-        data_dir="./data/TWStock",
-        log_dir="./sample_log",
-        output_dir="./stock_output",
+        model_path="./tw_log/ema_0.9999_040000.pt",
+        data_dir="./data/TWStock/train",
+        log_dir="./test_log",
+        output_dir="./stock_output/test",
     )
     defaults.update(model_and_diffusion_defaults())
     parser = argparse.ArgumentParser()
