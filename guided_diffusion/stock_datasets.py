@@ -13,22 +13,8 @@ def load_data(
     batch_size,
     stock_size,
     deterministic=False,
+    quick_sampling=True,
 ):
-    """
-    For a dataset, create a generator over (images, kwargs) pairs.
-
-    Each images is an NCHW float tensor, and the kwargs dict contains zero or
-    more keys, each of which map to a batched Tensor of their own.
-    The kwargs dict can be used for class labels, in which case the key is "y"
-    and the values are integer tensors of class labels.
-
-    :param data_dir: a dataset directory.
-    :param batch_size: the batch size of each returned pair.
-    :param image_size: the size to which images are resized.
-    :param deterministic: if True, yield results in a deterministic order.
-    :param random_crop: if True, randomly crop the images for augmentation.
-    :param random_flip: if True, randomly flip the images for augmentation.
-    """
     if not data_dir:
         raise ValueError("unspecified data directory")
     all_files, all_length = _list_image_files_recursively(data_dir)
@@ -36,6 +22,7 @@ def load_data(
         stock_size,
         all_files,
         all_length,
+        quick_sampling = quick_sampling,
     )
     print(f"dataset={len(dataset)}")
     if deterministic:
@@ -98,22 +85,25 @@ class StockDataset(Dataset):
         stocks_size,
         stocks_paths,
         stocks_length,
+        quick_sampling=True,
     ):
         super().__init__()
         self.stocks_size = stocks_size
         self.local_stocks = stocks_paths
         self.local_length = stocks_length
-        self.fast_count = 0
+        self.quick_remained = 0
         self.df = None
+        self.quick_sampling = quick_sampling
+        self.fname = ""
 
     def __len__(self):
         lens = sum(self.local_length) - len(self.local_length) * self.stocks_size
         return lens
 
     def __getitem__(self, idx):
-        if self.fast_count > 0:
+        if self.quick_sampling and self.quick_remained > 0:
             # This is dirty quick method, for the same df, we sample multiple times instead just once
-            self.fast_count = self.fast_count - 1
+            self.quick_remained = self.quick_remained - 1
             idx = random.randint(0, len(self.df) - self.stocks_size)
         else:
             for n, fname in zip(self.local_length, self.local_stocks):
@@ -123,11 +113,14 @@ class StockDataset(Dataset):
                     continue
 
                 self.df = pd.read_feather(fname)
-                self.fast_count = n // (self.stocks_size * 4) - 1
+                self.quick_remained = len(self.df) // (self.stocks_size * 4) - 1
+                self.fname = fname
                 break
 
         sample = self.df.iloc[idx:idx+self.stocks_size, 1:6].values.astype(np.float32)
-        # print(f"dtyep={sample.dtype}")
+        refdate = pd.to_datetime('1970-01-01')
+        xdate = self.df.iloc[idx:idx+self.stocks_size, 0]
+        days = (pd.to_datetime(xdate) - refdate).dt.days.values.astype(int)
         
         hx, lx = 0.9, -0.9
         hv, lv = 0.8, -1
@@ -144,4 +137,4 @@ class StockDataset(Dataset):
             sample[:,4] = (sample[:,4]-vmin) / (vmax-vmin) * (hv - lv) + lv
         
         sample = np.transpose(sample, [1, 0])
-        return sample, {}    # class is null ({})
+        return sample, days, self.fname

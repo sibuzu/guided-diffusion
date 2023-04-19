@@ -19,10 +19,7 @@ Helpers for distributed training.
 """
 
 import io
-
-import blobfile as bf
 import torch as th
-
 
 def dev(device=None):
     """
@@ -36,7 +33,7 @@ def dev(device=None):
 
 
 def load_state_dict(path, backend=None, **kwargs):
-    with bf.BlobFile(path, "rb") as f:
+    with open(path, "rb") as f:
         data = f.read()
     return th.load(io.BytesIO(data), **kwargs)
 

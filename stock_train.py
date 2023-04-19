@@ -38,6 +38,7 @@ def main():
         data_dir=args.data_dir,
         batch_size=args.batch_size,
         stock_size=args.stock_size,
+        quick_sampling=True
     )
 
     logger.log("training...")
@@ -62,7 +63,7 @@ def main():
 
 def create_argparser():
     defaults = dict(
-        data_dir="",
+        data_dir="./data/TWStock/train",
         schedule_sampler="uniform",
         lr=1e-4,
         weight_decay=0.0,
